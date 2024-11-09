@@ -30,8 +30,8 @@ DOCKER_TARGETS           ?= gnb ue
 
 docker-build:
 	for target in $(DOCKER_TARGETS); do \
-		DOCKER_BUILDKIT=$(DOCKER_BUILDKIT) docker build  $(DOCKER_BUILD_ARGS) \
-		        --file Dockerfile-$$target \
+		DOCKER_BUILDKIT=$(DOCKER_BUILDKIT) docker build $(DOCKER_BUILD_ARGS) \
+		  --file Dockerfile-$$target \
 			--target $$target \
 			--tag ${DOCKER_REGISTRY}${DOCKER_REPOSITORY}${PROJECT_NAME}-$$target:${DOCKER_TAG} \
 			--build-arg org_label_schema_version="${DOCKER_VERSION}" \
