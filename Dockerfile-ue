@@ -1,51 +1,70 @@
-FROM ubuntu:22.04 AS ue
+ARG OS_VERSION=22.04
+ARG SRSRAN_BRANCH=release_23_11
+
+##################
+# Stage 1: Build #
+##################
+FROM ubuntu:$OS_VERSION AS builder
 
 # Install dependencies
 # We need uhd so enb and ue are built
 # Use curl and unzip to get a specific commit state from github
 # Also install ping to test connections
-RUN apt-get update \
- && DEBIAN_FRONTEND=noninteractive apt-get install -y \
-     cmake \
-     libuhd-dev \
-     uhd-host \
-     libboost-program-options-dev \
-     libfftw3-dev \
-     libmbedtls-dev \
-     libsctp-dev \
-     libconfig++-dev \
-     libzmq3-dev \
-     curl \
-     iputils-ping \
-     iproute2 \
-     iptables \
-     unzip \
-     iperf3 \
-     git \
-     ca-certificates \
- && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y \
+    git \
+    build-essential \
+    cmake \
+    libuhd-dev \
+    uhd-host \
+    curl \
+    unzip \
+    libboost-program-options-dev \
+    libfftw3-dev \
+    libmbedtls-dev \
+    libboost-program-options-dev \
+    libconfig++-dev \
+    libsctp-dev \
+    libzmq3-dev && \
+    rm -rf /var/lib/apt/lists/*
 
-ADD srsue/startup.sh /opt/startup.sh
+ARG SRSRAN_BRANCH
+RUN git clone --depth 1 --branch ${SRSRAN_BRANCH} https://github.com/srsran/srsRAN_4G.git /src
 
-RUN git clone --branch release_23_11 https://github.com/srsran/srsRAN_4G.git /srslte/
-
-WORKDIR /srslte/build
+WORKDIR /src/build
 
 RUN cmake ../
 RUN make -j$(nproc)
 RUN make install
 
+# ################
+# # Stage 2: Run #
+# ################
+
+FROM ubuntu:$OS_VERSION AS ue
+
+COPY --from=builder /usr/local /usr/local
+
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y \
+    iputils-ping \
+    iproute2 \
+    iptables \
+    iperf3 \
+    libboost-program-options1.74.0 \
+    libfftw3-3 \
+    libmbedtls14 \
+    libzmq3-dev && \
+    rm -rf /var/lib/apt/lists/*
+
 # Update dynamic linker
 RUN ldconfig
 
-WORKDIR /srslte
-
-RUN cp build/srsue/src/srsue /opt/srsue
-
 WORKDIR /opt
-RUN chmod +x startup.sh
+
+ADD srsue/startup.sh startup.sh
+
 # Run commands with line buffered standard output
 # (-> get log messages in real time)
-#ENTRYPOINT [ "stdbuf", "-o", "L" ]
 
 CMD ["/bin/bash","-c","./startup.sh"]
