@@ -19,10 +19,10 @@ RUN apt-get update && \
     uhd-host \
     curl \
     unzip \
+    libboost-system-dev \
     libboost-program-options-dev \
     libfftw3-dev \
     libmbedtls-dev \
-    libboost-program-options-dev \
     libconfig++-dev \
     libsctp-dev \
     libzmq3-dev && \
