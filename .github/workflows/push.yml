@@ -99,8 +99,17 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_PASSWORD }}
 
-      - name: Build and push release Docker image
+      - name: Build and push release Docker image for gNB
         env:
+          DOCKER_TARGETS: gnb
+          DOCKER_TAG: rel-${{ needs.tag-github.outputs.version }}
+        run: |
+          make docker-build
+          make docker-push
+
+      - name: Build and push release Docker image for UE
+        env:
+          DOCKER_TARGETS: ue
           DOCKER_TAG: rel-${{ needs.tag-github.outputs.version }}
         run: |
           make docker-build
