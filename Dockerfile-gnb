@@ -84,6 +84,10 @@ RUN if [ -z "$NUM_CORES" ]; then NUM_CORES=$(nproc); fi && \
 
 FROM ubuntu:$OS_VERSION AS gnb
 
+LABEL maintainer="Aether SD-Core <dev@lists.aetherproject.org>" \
+    description="Image" \
+    version="Stage 3"
+
 ARG LIB
 ARG LIB_VERSION
 
