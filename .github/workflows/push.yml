@@ -112,6 +112,7 @@ jobs:
     if: needs.tag-github.outputs.changed == 'true'
     steps:
       - uses: actions/checkout@v4
+        token: ${{ secrets.GH_ONF_BOT_PAT }}
 
       - name: Increment version
         run: |
