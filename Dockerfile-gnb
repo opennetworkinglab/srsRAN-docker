@@ -97,7 +97,7 @@ COPY --from=builder /opt/${LIB}/${LIB_VERSION} /opt/${LIB}/${LIB_VERSION}
 COPY --from=builder /opt/srs /usr/local
 
 # Set PATH/LD_PATH
-ENV LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/${LIB}/${LIB_VERSION}/lib/
+ENV LD_LIBRARY_PATH=/opt/${LIB}/${LIB_VERSION}/lib/${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
 ENV PATH=$PATH:/opt/${LIB}/${LIB_VERSION}/bin/
 
 # Install srsran and lib runtime dependencies
@@ -109,7 +109,7 @@ RUN apt-get update && \
     libyaml-cpp0.8 \
     libdwarf1 \
     libuhd4.6.0t64 \
-    libzmq3-dev \
+    libzmq5 \
     libdpdk-dev \
     cpufrequtils \
     inetutils-tools \
