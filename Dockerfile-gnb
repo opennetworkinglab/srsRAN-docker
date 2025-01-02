@@ -55,14 +55,15 @@ RUN git clone --depth 1 --branch ${SRSRAN_BRANCH} https://github.com/srsran/srsR
 # Install srsRAN build dependencies
 ARG LIB
 RUN /src/docker/scripts/install_dependencies.sh build && \
-    /src/docker/scripts/install_dependencies.sh extra
+    /src/docker/scripts/install_dependencies.sh extra && \
+    /src/docker/scripts/install_${LIB}_dependencies.sh build
 
 ARG LIB_VERSION
 ARG MARCH
 ARG NUM_CORES
 
 # Compile UHD/DPDK
-# RUN /src/docker/scripts/build_${LIB}.sh ${LIB_VERSION} ${MARCH} ${NUM_CORES}
+RUN /src/docker/scripts/build_${LIB}.sh ${LIB_VERSION} ${MARCH} ${NUM_CORES}
 
 # Compile srsRAN Project and install it in the OS
 ARG EXTRA_CMAKE_ARGS
@@ -92,14 +93,12 @@ ARG LIB
 ARG LIB_VERSION
 
 # Copy srsRAN binaries and libraries installed in previous stage
-# COPY --from=builder /opt/${LIB}/${LIB_VERSION} /opt/${LIB}/${LIB_VERSION}
+COPY --from=builder /opt/${LIB}/${LIB_VERSION} /opt/${LIB}/${LIB_VERSION}
 COPY --from=builder /opt/srs /usr/local
 
-# Copy the install dependencies scripts
-# ADD docker/scripts/install_${LIB}_dependencies.sh /usr/local/etc/install_lib_dependencies.sh
-# ADD docker/scripts/install_dependencies.sh /usr/local/etc/install_srsran_dependencies.sh
-# ENV LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/${LIB}/${LIB_VERSION}/lib/:/opt/${LIB}/${LIB_VERSION}/lib/x86_64-linux-gnu/:/opt/${LIB}/${LIB_VERSION}/lib/aarch64-linux-gnu/
-# ENV PATH=$PATH:/opt/${LIB}/${LIB_VERSION}/bin/
+# Set PATH/LD_PATH
+ENV LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/${LIB}/${LIB_VERSION}/lib/
+ENV PATH=$PATH:/opt/${LIB}/${LIB_VERSION}/bin/
 
 # Install srsran and lib runtime dependencies
 RUN apt-get update && \
@@ -110,7 +109,12 @@ RUN apt-get update && \
     libyaml-cpp0.8 \
     libdwarf1 \
     libuhd4.6.0t64 \
-    libzmq3-dev && \
+    libzmq3-dev \
+    libdpdk-dev \
+    cpufrequtils \
+    inetutils-tools \
+    iputils-ping \
+    iproute2 && \
     apt-get autoremove && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
