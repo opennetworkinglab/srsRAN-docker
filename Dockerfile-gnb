@@ -1,5 +1,5 @@
 #
-# Copyright 2021-2024 Software Radio Systems Limited
+# Copyright 2021-2025 Software Radio Systems Limited
 #
 # This file is part of srsRAN
 #
@@ -21,19 +21,21 @@
 # Build args
 ################
 # OS_VERSION            Ubuntu OS version
-# LIB                   uhd or dpdk (lowercase)
-# LIB_VERSION           UHD or DPDK version number
+# UHD_VERSION           UHD version number
+# DPDK_VERSION          DPDK version number
 # MARCH                 gcc/clang compatible arch
-# NUM_CORES             Number or empty for all
+# NUM_JOBS              Number or empty for all
 # EXTRA_CMAKE_ARGS      Extra flags for srsRAN Project
 
 ARG OS_VERSION=24.04
-ARG SRSRAN_BRANCH=release_24_10
-ARG LIB=uhd
-ARG LIB_VERSION=4.7.0.0
+# Using `main` branch because it has some ORAN/E2-related changes that are required to test srsRAN with the Aether SD-RAN (RIC)
+ARG SRSRAN_BRANCH=main
+ARG UHD_VERSION=4.7.0.0
+ARG DPDK_VERSION=23.11.1
 ARG MARCH=native
-ARG NUM_CORES=""
-ARG EXTRA_CMAKE_ARGS="-DENABLE_EXPORT=ON -DENABLE_ZEROMQ=ON"
+ARG NUM_JOBS=""
+ARG COMPILER=clang
+ARG EXTRA_CMAKE_ARGS="-DENABLE_EXPORT=On -DENABLE_ZEROMQ=On"
 
 ##################
 # Stage 1: Build #
@@ -53,31 +55,44 @@ ARG SRSRAN_BRANCH
 RUN git clone --depth 1 --branch ${SRSRAN_BRANCH} https://github.com/srsran/srsRAN_Project.git /src
 
 # Install srsRAN build dependencies
-ARG LIB
 RUN /src/docker/scripts/install_dependencies.sh build && \
-    /src/docker/scripts/install_dependencies.sh extra && \
-    /src/docker/scripts/install_${LIB}_dependencies.sh build
+    /src/docker/scripts/install_uhd_dependencies.sh build && \
+    /src/docker/scripts/install_dpdk_dependencies.sh build && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    git \
+    clang \
+    libzmq3-dev
 
-ARG LIB_VERSION
+ARG UHD_VERSION
+ARG DPDK_VERSION
 ARG MARCH
-ARG NUM_CORES
+ARG NUM_JOBS
 
 # Compile UHD/DPDK
-RUN /src/docker/scripts/build_${LIB}.sh ${LIB_VERSION} ${MARCH} ${NUM_CORES}
+RUN /src/docker/scripts/build_uhd.sh "${UHD_VERSION}" ${MARCH} ${NUM_JOBS} && \
+    /src/docker/scripts/build_dpdk.sh "${DPDK_VERSION}" ${MARCH} ${NUM_JOBS}
 
 # Compile srsRAN Project and install it in the OS
+ARG COMPILER
 ARG EXTRA_CMAKE_ARGS
-RUN if [ -z "$NUM_CORES" ]; then NUM_CORES=$(nproc); fi && \
-    LIB_UPPER=$(echo $LIB | tr '[:lower:]' '[:upper:]') && \
-    export ${LIB_UPPER}_DIR="/opt/${LIB}/${LIB_VERSION}" && \
-    if [ "$LIB_UPPER" = "UHD" ]; then SPLIT="SPLIT_8"; else SPLIT="SPLIT_7_2"; fi \
+ENV UHD_DIR=/opt/uhd/${UHD_VERSION}
+ENV DPDK_DIR=/opt/dpdk/${DPDK_VERSION}
+RUN if [ -z "$NUM_JOBS" ]; then NUM_JOBS=$(nproc); fi \
     && \
-    /src/docker/scripts/builder.sh -m "-j${NUM_CORES} install" \
-    -DBUILD_TESTS=False -DMARCH=${MARCH} -DCMAKE_INSTALL_PREFIX=/opt/srs \
-    ${EXTRA_CMAKE_ARGS} /src
-
-# Copy extra binaries
-# RUN cp /src/build/tests/integrationtests/ofh/ru_emulator /opt/srs/bin/ru_emulator
+    /src/docker/scripts/builder.sh -c ${COMPILER} -m "-j${NUM_JOBS} srscu srsdu srsdu_split_8 srsdu_split_7_2 gnb gnb_split_8 gnb_split_7_2 ru_emulator" \
+    -DBUILD_TESTS=False -DENABLE_UHD=On -DENABLE_DPDK=On -DMARCH=${MARCH} -DCMAKE_INSTALL_PREFIX=/opt/srs \
+    ${EXTRA_CMAKE_ARGS} /src \
+    && \
+    mkdir -p /opt/srs/bin /opt/srs/share/srsran && \
+    cp /src/build/apps/cu/srscu                 /opt/srs/bin/srscu            && \
+    cp /src/build/apps/du/srsdu                 /opt/srs/bin/srsdu            && \
+    cp /src/build/apps/du_split_8/srsdu         /opt/srs/bin/srsdu_split_8    && \
+    cp /src/build/apps/du_split_7_2/srsdu       /opt/srs/bin/srsdu_split_7_2  && \
+    cp /src/build/apps/gnb/gnb                  /opt/srs/bin/gnb              && \
+    cp /src/build/apps/gnb_split_8/gnb          /opt/srs/bin/gnb_split_8      && \
+    cp /src/build/apps/gnb_split_7_2/gnb        /opt/srs/bin/gnb_split_7_2    && \
+    cp /src/build/apps/examples/ofh/ru_emulator /opt/srs/bin/ru_emulator      && \
+    cp /src/configs/*.yml                       /opt/srs/share/srsran/
 
 ################
 # Stage 2: Run #
@@ -89,28 +104,35 @@ LABEL maintainer="Aether SD-Core <dev@lists.aetherproject.org>" \
     description="Image" \
     version="Stage 3"
 
-ARG LIB
-ARG LIB_VERSION
+ARG UHD_VERSION
+ARG DPDK_VERSION
 
 # Copy srsRAN binaries and libraries installed in previous stage
-COPY --from=builder /opt/${LIB}/${LIB_VERSION} /opt/${LIB}/${LIB_VERSION}
-COPY --from=builder /opt/srs /usr/local
+COPY --from=builder /opt/uhd/${UHD_VERSION}   /opt/uhd/${UHD_VERSION}
+COPY --from=builder /opt/dpdk/${DPDK_VERSION} /opt/dpdk/${DPDK_VERSION}
+COPY --from=builder /opt/srs                  /usr/local
 
-# Set PATH/LD_PATH
-ENV LD_LIBRARY_PATH=/opt/${LIB}/${LIB_VERSION}/lib/${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
-ENV PATH=$PATH:/opt/${LIB}/${LIB_VERSION}/bin/
+ENV LD_LIBRARY_PATH=/opt/uhd/${UHD_VERSION}/lib/:/opt/uhd/${UHD_VERSION}/lib/x86_64-linux-gnu/:/opt/uhd/${UHD_VERSION}/lib/aarch64-linux-gnu/${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
+ENV LD_LIBRARY_PATH=/opt/dpdk/${DPDK_VERSION}/lib/:/opt/dpdk/${DPDK_VERSION}/lib/x86_64-linux-gnu/:/opt/dpdk/${DPDK_VERSION}/lib/aarch64-linux-gnu/${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
+ENV PATH=/opt/uhd/${UHD_VERSION}/bin/:/opt/dpdk/${DPDK_VERSION}/bin/${PATH:+:$PATH}
 
 # Install srsran and lib runtime dependencies
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    libatomic1 \
+    libdwarf1 \
+    libnuma1 \
+    libboost-chrono1.83.0t64 \
+    libboost-filesystem1.83.0 \
+    libboost-serialization1.83.0 \
+    libboost-thread1.83.0 \
+    libfdt1 \
     libfftw3-bin \
     libmbedtls14t64 \
     libsctp1 \
+    libusb-1.0-0 \
     libyaml-cpp0.8 \
-    libdwarf1 \
-    libuhd4.6.0t64 \
     libzmq5 \
-    libdpdk-dev \
     cpufrequtils \
     inetutils-tools \
     iputils-ping \
@@ -118,5 +140,3 @@ RUN apt-get update && \
     apt-get autoremove && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
-
-CMD ["/bin/bash", "-c", "gnb -c /opt/gnb_zmq.conf"]
