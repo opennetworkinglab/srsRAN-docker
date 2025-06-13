@@ -133,6 +133,7 @@ RUN apt-get update && \
     libusb-1.0-0 \
     libyaml-cpp0.8 \
     libzmq5 \
+    librte-net-mlx4-24 \
     cpufrequtils \
     inetutils-tools \
     iputils-ping \
