@@ -18,7 +18,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Dockerfile linter
-        uses: hadolint/hadolint-action@v3.1.0
+        uses: hadolint/hadolint-action@v3.2.0
         # For now, ignoring:
         # DL3008 warning: Pin versions in apt get install (e.g., apt-get install <package>=<version>);
         # DL4006 warning: Set the SHELL option -o pipefail before RUN with a pipe in it; and
@@ -33,7 +33,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Dockerfile linter
-        uses: hadolint/hadolint-action@v3.1.0
+        uses: hadolint/hadolint-action@v3.2.0
         # For now, ignoring:
         # DL3008 warning: Pin versions in apt get install (e.g., apt-get install <package>=<version>)
         with:
