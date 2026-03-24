@@ -1,3 +1,3 @@
 # srsRAN-docker
 
-This repository contains Dockerfiles to build Docker images for srsRAN gNB and srsRAN UE
+This repository contains Dockerfiles to build Docker images for OCUDU, srsRAN gNB and srsRAN UE

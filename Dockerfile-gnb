@@ -21,6 +21,7 @@
 # Build args
 ################
 # OS_VERSION            Ubuntu OS version
+# SRSRAN_REF            Git ref to build
 # UHD_VERSION           UHD version number
 # DPDK_VERSION          DPDK version number
 # MARCH                 gcc/clang compatible arch
@@ -28,8 +29,8 @@
 # EXTRA_CMAKE_ARGS      Extra flags for srsRAN Project
 
 ARG OS_VERSION=24.04
-# Using `main` branch because it has some ORAN/E2-related changes that are required to test srsRAN with the Aether SD-RAN (RIC)
-ARG SRSRAN_BRANCH=main
+# Using `main` ref because it has some ORAN/E2-related changes that are required to test srsRAN with the Aether SD-RAN (RIC)
+ARG SRSRAN_REF=main
 ARG UHD_VERSION=4.7.0.0
 ARG DPDK_VERSION=23.11.1
 ARG MARCH=native
@@ -51,8 +52,8 @@ RUN apt-get update && \
 # Adding the complete repo to the context, in /src folder
 # ADD . /src/
 # An alternative could be to download the repo
-ARG SRSRAN_BRANCH
-RUN git clone --depth 1 --branch ${SRSRAN_BRANCH} https://github.com/srsran/srsRAN_Project.git /src
+ARG SRSRAN_REF
+RUN git clone --depth 1 --branch ${SRSRAN_REF} https://github.com/srsran/srsRAN_Project.git /src
 
 # Install srsRAN build dependencies
 RUN /src/docker/scripts/install_dependencies.sh build && \
@@ -100,9 +101,28 @@ RUN if [ -z "$NUM_JOBS" ]; then NUM_JOBS=$(nproc); fi \
 
 FROM ubuntu:$OS_VERSION AS gnb
 
-LABEL maintainer="Aether SD-Core <dev@lists.aetherproject.org>" \
-    description="Image" \
-    version="Stage 3"
+# Build arguments for dynamic labels
+ARG VERSION=dev
+ARG VCS_URL=unknown
+ARG VCS_REF=unknown
+ARG BUILD_DATE=unknown
+ARG SRSRAN_REF
+ARG UPSTREAM_COMMIT=unknown
+
+LABEL org.opencontainers.image.source="${VCS_URL}" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.created="${BUILD_DATE}" \
+      org.opencontainers.image.revision="${VCS_REF}" \
+      org.opencontainers.image.url="${VCS_URL}" \
+      org.opencontainers.image.title="srsran-gnb" \
+      org.opencontainers.image.description="srsRAN Project gNB" \
+      org.opencontainers.image.authors="Aether SD-Core <dev@lists.aetherproject.org>" \
+      org.opencontainers.image.vendor="Aether Project" \
+      org.opencontainers.image.licenses="AGPL-3.0-or-later" \
+      org.opencontainers.image.documentation="https://docs.srsran.com/projects/project" \
+      org.srsran.upstream.source="https://github.com/srsran/srsRAN_Project.git" \
+    org.srsran.upstream.ref="${SRSRAN_REF}" \
+      org.srsran.upstream.commit="${UPSTREAM_COMMIT}"
 
 ARG UHD_VERSION
 ARG DPDK_VERSION

@@ -1,0 +1,201 @@
+#
+# Copyright 2026 Intel Corporation
+# SPDX-License-Identifier: Apache-2.0
+#
+# OCUDU gNB Dockerfile
+# Supports: ZMQ, SDR/USRP (UHD), and DPDK deployments
+#
+# Reference: Dockerfile-gnb (srsRAN Project)
+#
+
+# Build args
+################
+# OS_VERSION            Ubuntu OS version
+# UHD_VERSION           UHD version number
+# DPDK_VERSION          DPDK version number
+# MARCH                 gcc/clang compatible arch
+# NUM_JOBS              Number or empty for all
+# COMPILER              gcc or clang
+# EXTRA_CMAKE_ARGS      Extra flags for OCUDU
+# OCUDU_REF             Git branch / tag to build
+
+ARG OS_VERSION=24.04
+ARG OCUDU_REF=main
+ARG UHD_VERSION=4.7.0.0
+ARG DPDK_VERSION=24.11.4
+ARG MARCH=native
+ARG NUM_JOBS=""
+ARG COMPILER=gcc
+ARG EXTRA_CMAKE_ARGS="-DENABLE_EXPORT=On -DENABLE_ZEROMQ=On"
+
+####################################
+# Stage 1a: Base build environment #
+####################################
+FROM ubuntu:$OS_VERSION AS builder-base
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    git \
+    git-lfs \
+    ca-certificates
+
+ARG OCUDU_REF
+RUN git clone --depth 1 --branch ${OCUDU_REF} https://gitlab.com/ocudu/ocudu.git /src
+
+# Install OCUDU build dependencies (includes ROHC, UHD, DPDK build deps)
+RUN /src/docker/scripts/install_dependencies.sh build && \
+    /src/docker/scripts/install_uhd_dependencies.sh build && \
+    /src/docker/scripts/install_dpdk_dependencies.sh build && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    git \
+    clang \
+    libzmq3-dev
+
+####################################
+# Stage 1b: Build ROHC in parallel #
+####################################
+FROM builder-base AS builder-rohc
+
+ARG MARCH
+ARG NUM_JOBS
+
+RUN /src/docker/scripts/install_rohc_dependencies.sh build
+RUN /src/docker/scripts/build_rohc.sh ${MARCH} ${NUM_JOBS}
+
+####################################
+# Stage 1c: Build UHD, DPDK, OCUDU #
+####################################
+FROM builder-base AS builder
+
+ARG UHD_VERSION
+ARG DPDK_VERSION
+ARG MARCH
+ARG NUM_JOBS
+ARG TARGETARCH
+
+# Pull ROHC artefacts from the parallel stage (avoids ROHC build deps
+# polluting the DPDK build environment)
+COPY --from=builder-rohc /opt/rohc /opt/rohc
+
+# Compile UHD and DPDK
+RUN ARCH_FLAG=$([ "${TARGETARCH}" = "arm64" ] && echo "-mcpu=${MARCH}" || echo "-march=${MARCH}") && \
+    /src/docker/scripts/build_uhd.sh "${UHD_VERSION}" "${ARCH_FLAG}" ${NUM_JOBS} && \
+    /src/docker/scripts/build_dpdk.sh "${DPDK_VERSION}" "${ARCH_FLAG}" ${NUM_JOBS}
+
+# Preload UHD images so SDR/USRP mode works without post-build setup.
+RUN /opt/uhd/${UHD_VERSION}/bin/uhd_images_downloader
+
+# Keep only UHD images for B210 and X310 hardware.
+RUN find /opt/uhd/${UHD_VERSION}/share/uhd/images -maxdepth 1 -type f | while read -r image; do \
+    image_name=$(basename "${image}"); \
+    case "${image_name}" in \
+        inventory.json|usrp_b200_bl.img|usrp_b200_fw.hex|usrp_b210_*|usrp_x310_*) ;; \
+        *) rm -f "${image}" ;; \
+    esac; \
+    done
+
+# Compile OCUDU and install into /opt/ocudu
+ARG COMPILER
+ARG EXTRA_CMAKE_ARGS
+ENV ROHC_DIR=/opt/rohc
+ENV UHD_DIR=/opt/uhd/${UHD_VERSION}
+ENV DPDK_DIR=/opt/dpdk/${DPDK_VERSION}
+
+RUN if [ -z "$NUM_JOBS" ]; then NUM_JOBS=$(nproc); fi \
+    && CMAKE_ARCH_FLAG=$([ "${TARGETARCH}" = "arm64" ] && echo "-DMCPU=${MARCH}" || echo "-DMARCH=${MARCH}") \
+    && \
+    /src/docker/scripts/builder.sh -c ${COMPILER} \
+        -m "-j${NUM_JOBS} ocu odu odu_split_8 odu_split_7_2 gnb gnb_split_8 gnb_split_7_2 ru_emulator" \
+        -DBUILD_TESTING=False \
+        -DENABLE_UHD=On \
+        -DENABLE_DPDK=On \
+        ${CMAKE_ARCH_FLAG} \
+        -DCMAKE_INSTALL_PREFIX=/opt/ocudu \
+        ${EXTRA_CMAKE_ARGS} /src \
+    && \
+    mkdir -p /opt/ocudu/bin /opt/ocudu/share/ocudu && \
+    cp /src/build/apps/cu/ocu                 /opt/ocudu/bin/ocu              && \
+    cp /src/build/apps/du/odu                 /opt/ocudu/bin/odu              && \
+    cp /src/build/apps/du_split_8/odu         /opt/ocudu/bin/odu_split_8      && \
+    cp /src/build/apps/du_split_7_2/odu       /opt/ocudu/bin/odu_split_7_2    && \
+    cp /src/build/apps/gnb/gnb               /opt/ocudu/bin/gnb              && \
+    cp /src/build/apps/gnb_split_8/gnb        /opt/ocudu/bin/gnb_split_8      && \
+    cp /src/build/apps/gnb_split_7_2/gnb      /opt/ocudu/bin/gnb_split_7_2    && \
+    cp /src/build/apps/examples/ofh/ru_emulator /opt/ocudu/bin/ru_emulator    && \
+    cp /src/configs/*.yml                     /opt/ocudu/share/ocudu/
+
+##################
+# Stage 2: Run   #
+##################
+FROM ubuntu:$OS_VERSION AS ocudu
+
+# Build arguments for dynamic labels
+ARG VERSION=dev
+ARG VCS_URL=unknown
+ARG VCS_REF=unknown
+ARG BUILD_DATE=unknown
+ARG OCUDU_REF
+ARG UPSTREAM_COMMIT=unknown
+
+LABEL org.opencontainers.image.source="${VCS_URL}" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.created="${BUILD_DATE}" \
+      org.opencontainers.image.revision="${VCS_REF}" \
+      org.opencontainers.image.url="${VCS_URL}" \
+      org.opencontainers.image.title="OCUDU" \
+      org.opencontainers.image.description="OCUDU: gnb, ocu, odu, ru_emulator — ZMQ / SDR (UHD) / DPDK" \
+      org.opencontainers.image.authors="Aether SD-Core <dev@lists.aetherproject.org>" \
+      org.opencontainers.image.vendor="Aether Project" \
+      org.opencontainers.image.licenses="Apache-2.0" \
+      org.opencontainers.image.documentation="https://docs.sd-core.aetherproject.org/" \
+      org.ocudu.upstream.source="https://gitlab.com/ocudu/ocudu.git" \
+      org.ocudu.upstream.ref="${OCUDU_REF}" \
+      org.ocudu.upstream.commit="${UPSTREAM_COMMIT}"
+
+ARG UHD_VERSION
+ARG DPDK_VERSION
+
+# Copy only the compiled artefacts
+COPY --from=builder /opt/rohc                 /opt/rohc
+COPY --from=builder /opt/uhd/${UHD_VERSION}   /opt/uhd/${UHD_VERSION}
+COPY --from=builder /opt/dpdk/${DPDK_VERSION} /opt/dpdk/${DPDK_VERSION}
+COPY --from=builder /opt/ocudu                /usr/local
+
+# Library and binary search paths
+ENV LD_LIBRARY_PATH=
+ENV LD_LIBRARY_PATH=/opt/rohc/lib/${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
+ENV LD_LIBRARY_PATH=/opt/uhd/${UHD_VERSION}/lib/:/opt/uhd/${UHD_VERSION}/lib/x86_64-linux-gnu/:/opt/uhd/${UHD_VERSION}/lib/aarch64-linux-gnu/${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
+ENV LD_LIBRARY_PATH=/opt/dpdk/${DPDK_VERSION}/lib/:/opt/dpdk/${DPDK_VERSION}/lib/x86_64-linux-gnu/:/opt/dpdk/${DPDK_VERSION}/lib/aarch64-linux-gnu/${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
+ENV PATH=/opt/uhd/${UHD_VERSION}/bin/:/opt/dpdk/${DPDK_VERSION}/bin/${PATH:+:$PATH}
+
+# Install ONLY the runtime libraries
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    # core runtime libs
+    libatomic1 \
+    libdwarf1 \
+    libnuma1 \
+    libboost-chrono1.83.0t64 \
+    libboost-filesystem1.83.0 \
+    libboost-program-options1.83.0 \
+    libboost-serialization1.83.0 \
+    libboost-thread1.83.0 \
+    libfdt1 \
+    libfftw3-bin \
+    libmbedtls14t64 \
+    libsctp1 \
+    libusb-1.0-0 \
+    libyaml-cpp0.8 \
+    # ZMQ runtime
+    libzmq5 \
+    # DPDK Mellanox NIC driver
+    librte-net-mlx4-24 \
+    # handy utilities (minimal footprint)
+    cpufrequtils \
+    inetutils-tools \
+    iputils-ping \
+    iproute2 \
+    pciutils && \
+    apt-get autoremove -y && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*

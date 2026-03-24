@@ -12,17 +12,32 @@ DOCKER_VERSION           ?= $(shell cat ./VERSION)
 DOCKER_REGISTRY          ?=
 DOCKER_REPOSITORY        ?=
 DOCKER_TAG               ?= ${DOCKER_VERSION}
-DOCKER_IMAGENAME         := ${DOCKER_REGISTRY}${DOCKER_REPOSITORY}${PROJECT_NAME}:${DOCKER_TAG}
 DOCKER_BUILDKIT          ?= 1
 DOCKER_BUILD_ARGS        ?=
 
-## Docker labels. Only set ref and commit date if committed
-DOCKER_LABEL_VCS_URL     ?= $(shell git remote get-url $(shell git remote))
-DOCKER_LABEL_VCS_REF     ?= $(shell git diff-index --quiet HEAD -- && git rev-parse HEAD || echo "unknown")
-DOCKER_LABEL_COMMIT_DATE ?= $(shell git diff-index --quiet HEAD -- && git show -s --format=%cd --date=iso-strict HEAD || echo "unknown" )
+## Docker labels with error handling
+DOCKER_LABEL_VCS_URL     ?= $(shell git remote get-url origin 2>/dev/null || echo "unknown")
+DOCKER_LABEL_VCS_REF     ?= $(shell \
+	echo "$${GIT_COMMIT:-$${GITHUB_SHA:-$${CI_COMMIT_SHA:-$(shell \
+		if git rev-parse --git-dir > /dev/null 2>&1; then \
+			git rev-parse HEAD 2>/dev/null; \
+		else \
+			echo "unknown"; \
+		fi \
+	)}}}")
 DOCKER_LABEL_BUILD_DATE  ?= $(shell date -u "+%Y-%m-%dT%H:%M:%SZ")
 
-DOCKER_TARGETS           ?= gnb ue
+## Upstream source refs (must match Dockerfile ARG defaults)
+SRSRAN_GNB_REF           ?= release_25_10
+SRSRAN_UE_REF            ?= release_23_11
+OCUDU_REF                ?= release_26_04_rc1
+
+## Resolve upstream refs to commit SHAs via git ls-remote
+SRSRAN_GNB_COMMIT        ?= $(shell git ls-remote https://github.com/srsran/srsRAN_Project.git refs/tags/$(SRSRAN_GNB_REF)^{} refs/tags/$(SRSRAN_GNB_REF) refs/heads/$(SRSRAN_GNB_REF) 2>/dev/null | cut -f1 | head -n1 || echo "unknown")
+SRSRAN_UE_COMMIT         ?= $(shell git ls-remote https://github.com/srsran/srsRAN_4G.git refs/tags/$(SRSRAN_UE_REF)^{} refs/tags/$(SRSRAN_UE_REF) refs/heads/$(SRSRAN_UE_REF) 2>/dev/null | cut -f1 | head -n1 || echo "unknown")
+OCUDU_COMMIT             ?= $(shell git ls-remote https://gitlab.com/ocudu/ocudu.git refs/tags/$(OCUDU_REF)^{} refs/tags/$(OCUDU_REF) refs/heads/$(OCUDU_REF) 2>/dev/null | cut -f1 | head -n1 || echo "unknown")
+
+DOCKER_TARGETS           ?= gnb ue ocudu
 
 .PHONY: docker-build docker-push
 
@@ -30,20 +45,41 @@ DOCKER_TARGETS           ?= gnb ue
 
 docker-build:
 	for target in $(DOCKER_TARGETS); do \
+		case $$target in \
+			gnb)    _UPSTREAM_COMMIT="$(SRSRAN_GNB_COMMIT)" ;; \
+			ue)     _UPSTREAM_COMMIT="$(SRSRAN_UE_COMMIT)" ;; \
+			ocudu)  _UPSTREAM_COMMIT="$(OCUDU_COMMIT)" ;; \
+			*)      _UPSTREAM_COMMIT="unknown" ;; \
+		esac; \
+		case $$target in \
+			gnb)    _TARGET_BUILD_ARGS="--build-arg SRSRAN_REF=$(SRSRAN_GNB_REF)" ;; \
+			ue)     _TARGET_BUILD_ARGS="--build-arg SRSRAN_REF=$(SRSRAN_UE_REF)" ;; \
+			ocudu)  _TARGET_BUILD_ARGS="--build-arg OCUDU_REF=$(OCUDU_REF)" ;; \
+			*)      _TARGET_BUILD_ARGS="" ;; \
+		esac; \
+		case $$target in \
+			ocudu)  _IMAGE_NAME="${DOCKER_REGISTRY}${DOCKER_REPOSITORY}$$target:${DOCKER_TAG}" ;; \
+			*)      _IMAGE_NAME="${DOCKER_REGISTRY}${DOCKER_REPOSITORY}${PROJECT_NAME}-$$target:${DOCKER_TAG}" ;; \
+		esac; \
 		DOCKER_BUILDKIT=$(DOCKER_BUILDKIT) docker build $(DOCKER_BUILD_ARGS) \
 			--file Dockerfile-$$target \
 			--target $$target \
-			--tag ${DOCKER_REGISTRY}${DOCKER_REPOSITORY}${PROJECT_NAME}-$$target:${DOCKER_TAG} \
-			--build-arg org_label_schema_version="${DOCKER_VERSION}" \
-			--build-arg org_label_schema_vcs_url="${DOCKER_LABEL_VCS_URL}" \
-			--build-arg org_label_schema_vcs_ref="${DOCKER_LABEL_VCS_REF}" \
-			--build-arg org_label_schema_build_date="${DOCKER_LABEL_BUILD_DATE}" \
-			--build-arg org_opencord_vcs_commit_date="${DOCKER_LABEL_COMMIT_DATE}" \
+			--tag $$_IMAGE_NAME \
+			--build-arg VERSION="${DOCKER_VERSION}" \
+			--build-arg VCS_URL="${DOCKER_LABEL_VCS_URL}" \
+			--build-arg VCS_REF="${DOCKER_LABEL_VCS_REF}" \
+			--build-arg BUILD_DATE="${DOCKER_LABEL_BUILD_DATE}" \
+			--build-arg UPSTREAM_COMMIT="$$_UPSTREAM_COMMIT" \
+			$$_TARGET_BUILD_ARGS \
 			. \
 			|| exit 1; \
 	done
 
 docker-push:
 	for target in $(DOCKER_TARGETS); do \
-		docker push ${DOCKER_REGISTRY}${DOCKER_REPOSITORY}${PROJECT_NAME}-$$target:${DOCKER_TAG}; \
+		case $$target in \
+			ocudu)  _IMAGE_NAME="${DOCKER_REGISTRY}${DOCKER_REPOSITORY}$$target:${DOCKER_TAG}" ;; \
+			*)      _IMAGE_NAME="${DOCKER_REGISTRY}${DOCKER_REPOSITORY}${PROJECT_NAME}-$$target:${DOCKER_TAG}" ;; \
+		esac; \
+		docker push $$_IMAGE_NAME; \
 	done
