@@ -32,10 +32,9 @@ SRSRAN_GNB_REF           ?= release_25_10
 SRSRAN_UE_REF            ?= release_23_11
 OCUDU_REF                ?= release_26_04_rc1
 
-## Resolve upstream refs to commit SHAs via git ls-remote
-SRSRAN_GNB_COMMIT        ?= $(shell git ls-remote https://github.com/srsran/srsRAN_Project.git refs/tags/$(SRSRAN_GNB_REF)^{} refs/tags/$(SRSRAN_GNB_REF) refs/heads/$(SRSRAN_GNB_REF) 2>/dev/null | cut -f1 | head -n1 || echo "unknown")
-SRSRAN_UE_COMMIT         ?= $(shell git ls-remote https://github.com/srsran/srsRAN_4G.git refs/tags/$(SRSRAN_UE_REF)^{} refs/tags/$(SRSRAN_UE_REF) refs/heads/$(SRSRAN_UE_REF) 2>/dev/null | cut -f1 | head -n1 || echo "unknown")
-OCUDU_COMMIT             ?= $(shell git ls-remote https://gitlab.com/ocudu/ocudu.git refs/tags/$(OCUDU_REF)^{} refs/tags/$(OCUDU_REF) refs/heads/$(OCUDU_REF) 2>/dev/null | cut -f1 | head -n1 || echo "unknown")
+SRSRAN_GNB_REPO          ?= https://github.com/srsran/srsRAN_Project.git
+SRSRAN_UE_REPO           ?= https://github.com/srsran/srsRAN_4G.git
+OCUDU_REPO               ?= https://gitlab.com/ocudu/ocudu.git
 
 DOCKER_TARGETS           ?= gnb ue ocudu
 
@@ -46,11 +45,16 @@ DOCKER_TARGETS           ?= gnb ue ocudu
 docker-build:
 	for target in $(DOCKER_TARGETS); do \
 		case $$target in \
-			gnb)    _UPSTREAM_COMMIT="$(SRSRAN_GNB_COMMIT)" ;; \
-			ue)     _UPSTREAM_COMMIT="$(SRSRAN_UE_COMMIT)" ;; \
-			ocudu)  _UPSTREAM_COMMIT="$(OCUDU_COMMIT)" ;; \
-			*)      _UPSTREAM_COMMIT="unknown" ;; \
+			gnb)    _UPSTREAM_REPO="$(SRSRAN_GNB_REPO)"; _UPSTREAM_REF="$(SRSRAN_GNB_REF)" ;; \
+			ue)     _UPSTREAM_REPO="$(SRSRAN_UE_REPO)"; _UPSTREAM_REF="$(SRSRAN_UE_REF)" ;; \
+			ocudu)  _UPSTREAM_REPO="$(OCUDU_REPO)"; _UPSTREAM_REF="$(OCUDU_REF)" ;; \
+			*)      _UPSTREAM_REPO=""; _UPSTREAM_REF="" ;; \
 		esac; \
+		if [ -n "$$_UPSTREAM_REPO" ]; then \
+			_UPSTREAM_COMMIT=$$(git ls-remote "$$_UPSTREAM_REPO" "refs/tags/$$_UPSTREAM_REF^{}" "refs/tags/$$_UPSTREAM_REF" "refs/heads/$$_UPSTREAM_REF" 2>/dev/null | awk 'NR == 1 { print $$1; found = 1 } END { if (!found) print "unknown" }'); \
+		else \
+			_UPSTREAM_COMMIT="unknown"; \
+		fi; \
 		case $$target in \
 			gnb)    _TARGET_BUILD_ARGS="--build-arg SRSRAN_REF=$(SRSRAN_GNB_REF)" ;; \
 			ue)     _TARGET_BUILD_ARGS="--build-arg SRSRAN_REF=$(SRSRAN_UE_REF)" ;; \
