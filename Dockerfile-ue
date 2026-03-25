@@ -1,5 +1,10 @@
+# Build args
+################
+# OS_VERSION            Ubuntu OS version
+# SRSRAN_REF            Git ref to build
+
 ARG OS_VERSION=22.04
-ARG SRSRAN_BRANCH=release_23_11
+ARG SRSRAN_REF=release_23_11
 
 ##################
 # Stage 1: Build #
@@ -8,7 +13,7 @@ FROM ubuntu:$OS_VERSION AS builder
 
 # Install dependencies
 # We need uhd so enb and ue are built
-# Use curl and unzip to get a specific commit state from github
+# Use curl and unzip to get a specific ref state from GitHub
 # Also install ping to test connections
 RUN apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
@@ -28,8 +33,8 @@ RUN apt-get update && \
     libzmq3-dev && \
     rm -rf /var/lib/apt/lists/*
 
-ARG SRSRAN_BRANCH
-RUN git clone --depth 1 --branch ${SRSRAN_BRANCH} https://github.com/srsran/srsRAN_4G.git /src
+ARG SRSRAN_REF
+RUN git clone --depth 1 --branch ${SRSRAN_REF} https://github.com/srsran/srsRAN_4G.git /src
 
 WORKDIR /src/build
 
@@ -42,6 +47,29 @@ RUN make install
 # ################
 
 FROM ubuntu:$OS_VERSION AS ue
+
+# Build arguments for dynamic labels
+ARG VERSION=dev
+ARG VCS_URL=unknown
+ARG VCS_REF=unknown
+ARG BUILD_DATE=unknown
+ARG SRSRAN_REF
+ARG UPSTREAM_COMMIT=unknown
+
+LABEL org.opencontainers.image.source="${VCS_URL}" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.created="${BUILD_DATE}" \
+      org.opencontainers.image.revision="${VCS_REF}" \
+      org.opencontainers.image.url="${VCS_URL}" \
+      org.opencontainers.image.title="srsran-ue" \
+      org.opencontainers.image.description="srsRAN 4G UE Simulator" \
+      org.opencontainers.image.authors="Aether SD-Core <dev@lists.aetherproject.org>" \
+      org.opencontainers.image.vendor="Aether Project" \
+      org.opencontainers.image.licenses="AGPL-3.0-or-later" \
+      org.opencontainers.image.documentation="https://docs.srsran.com/projects/4g" \
+      org.srsran.upstream.source="https://github.com/srsran/srsRAN_4G.git" \
+      org.srsran.upstream.ref="${SRSRAN_REF}" \
+      org.srsran.upstream.commit="${UPSTREAM_COMMIT}"
 
 COPY --from=builder /usr/local /usr/local
 
