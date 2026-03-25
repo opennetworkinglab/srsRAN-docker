@@ -37,7 +37,8 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     git \
     git-lfs \
-    ca-certificates
+    ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
 
 ARG OCUDU_REF
 RUN git clone --depth 1 --branch ${OCUDU_REF} https://gitlab.com/ocudu/ocudu.git /src
@@ -48,7 +49,8 @@ RUN /src/docker/scripts/install_dependencies.sh build && \
     /src/docker/scripts/install_dpdk_dependencies.sh build && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     clang \
-    libzmq3-dev
+    libzmq3-dev && \
+    rm -rf /var/lib/apt/lists/*
 
 ####################################
 # Stage 1b: Build ROHC in parallel #
@@ -58,13 +60,15 @@ FROM builder-base AS builder-rohc
 ARG MARCH
 ARG NUM_JOBS
 
-RUN /src/docker/scripts/install_rohc_dependencies.sh build
-RUN /src/docker/scripts/build_rohc.sh ${MARCH} ${NUM_JOBS}
+RUN /src/docker/scripts/install_rohc_dependencies.sh build && \
+    /src/docker/scripts/build_rohc.sh "${MARCH}" "${NUM_JOBS}"
 
 ####################################
 # Stage 1c: Build UHD, DPDK, OCUDU #
 ####################################
 FROM builder-base AS builder
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 ARG UHD_VERSION
 ARG DPDK_VERSION
@@ -78,8 +82,8 @@ COPY --from=builder-rohc /opt/rohc /opt/rohc
 
 # Compile UHD and DPDK
 RUN ARCH_FLAG=$([ "${TARGETARCH}" = "arm64" ] && echo "-mcpu=${MARCH}" || echo "-march=${MARCH}") && \
-    /src/docker/scripts/build_uhd.sh "${UHD_VERSION}" "${ARCH_FLAG}" ${NUM_JOBS} && \
-    /src/docker/scripts/build_dpdk.sh "${DPDK_VERSION}" "${ARCH_FLAG}" ${NUM_JOBS}
+    /src/docker/scripts/build_uhd.sh "${UHD_VERSION}" "${ARCH_FLAG}" "${NUM_JOBS}" && \
+    /src/docker/scripts/build_dpdk.sh "${DPDK_VERSION}" "${ARCH_FLAG}" "${NUM_JOBS}"
 
 # Preload UHD images so SDR/USRP mode works without post-build setup.
 RUN /opt/uhd/${UHD_VERSION}/bin/uhd_images_downloader
@@ -102,15 +106,16 @@ ENV DPDK_DIR=/opt/dpdk/${DPDK_VERSION}
 
 RUN if [ -z "$NUM_JOBS" ]; then NUM_JOBS=$(nproc); fi \
     && CMAKE_ARCH_FLAG=$([ "${TARGETARCH}" = "arm64" ] && echo "-DMCPU=${MARCH}" || echo "-DMARCH=${MARCH}") \
+    && read -r -a EXTRA_CMAKE_ARGS_ARRAY <<< "${EXTRA_CMAKE_ARGS}" \
     && \
-    /src/docker/scripts/builder.sh -c ${COMPILER} \
+    /src/docker/scripts/builder.sh -c "${COMPILER}" \
         -m "-j${NUM_JOBS} ocu odu odu_split_8 odu_split_7_2 gnb gnb_split_8 gnb_split_7_2 ru_emulator" \
         -DBUILD_TESTING=False \
         -DENABLE_UHD=On \
         -DENABLE_DPDK=On \
-        ${CMAKE_ARCH_FLAG} \
+        "${CMAKE_ARCH_FLAG}" \
         -DCMAKE_INSTALL_PREFIX=/opt/ocudu \
-        ${EXTRA_CMAKE_ARGS} /src \
+        "${EXTRA_CMAKE_ARGS_ARRAY[@]}" /src \
     && \
     mkdir -p /opt/ocudu/bin /opt/ocudu/share/ocudu && \
     cp /src/build/apps/cu/ocu                 /opt/ocudu/bin/ocu              && \
