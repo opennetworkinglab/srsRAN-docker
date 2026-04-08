@@ -80,10 +80,12 @@ ARG TARGETARCH
 # polluting the DPDK build environment)
 COPY --from=builder-rohc /opt/rohc /opt/rohc
 
-# Compile UHD and DPDK
-RUN ARCH_FLAG=$([ "${TARGETARCH}" = "arm64" ] && echo "-mcpu=${MARCH}" || echo "-march=${MARCH}") && \
-    /src/docker/scripts/build_uhd.sh "${UHD_VERSION}" "${ARCH_FLAG}" "${NUM_JOBS}" && \
-    /src/docker/scripts/build_dpdk.sh "${DPDK_VERSION}" "${ARCH_FLAG}" "${NUM_JOBS}"
+# Compile UHD and DPDK. OCUDU's UHD helper expects compiler arch flags,
+# while its DPDK helper passes the argument straight to meson setup.
+RUN UHD_ARCH=$([ "${TARGETARCH}" = "arm64" ] && echo "-mcpu=${MARCH}" || echo "-march=${MARCH}") && \
+    DPDK_ARCH=$([ "${TARGETARCH}" = "arm64" ] && echo "-Dplatform=${DPDK_PLATFORM} -Dmax_numa_nodes=1" || echo "-Dcpu_instruction_set=${MARCH}") && \
+    /src/docker/scripts/build_uhd.sh "${UHD_VERSION}" "${UHD_ARCH}" "${NUM_JOBS}" && \
+    /src/docker/scripts/build_dpdk.sh "${DPDK_VERSION}" "${DPDK_ARCH}" "${NUM_JOBS}"
 
 # Preload UHD images so SDR/USRP mode works without post-build setup.
 RUN /opt/uhd/${UHD_VERSION}/bin/uhd_images_downloader
