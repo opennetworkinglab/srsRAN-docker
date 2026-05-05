@@ -31,12 +31,14 @@ DOCKER_LABEL_BUILD_DATE  ?= $(shell date -u "+%Y-%m-%dT%H:%M:%SZ")
 SRSRAN_GNB_REF           ?= release_25_10
 SRSRAN_UE_REF            ?= release_23_11
 OCUDU_REF                ?= release_26_04
+UERANSIM_REF             ?= v3.2.7
 
 SRSRAN_GNB_REPO          ?= https://github.com/srsran/srsRAN_Project.git
 SRSRAN_UE_REPO           ?= https://github.com/srsran/srsRAN_4G.git
 OCUDU_REPO               ?= https://gitlab.com/ocudu/ocudu.git
+UERANSIM_REPO            ?= https://github.com/aligungr/UERANSIM.git
 
-DOCKER_TARGETS           ?= gnb ue ocudu
+DOCKER_TARGETS           ?= gnb ue ocudu ueransim
 
 .PHONY: docker-build docker-push
 
@@ -48,6 +50,7 @@ docker-build:
 			gnb)    _UPSTREAM_REPO="$(SRSRAN_GNB_REPO)"; _UPSTREAM_REF="$(SRSRAN_GNB_REF)" ;; \
 			ue)     _UPSTREAM_REPO="$(SRSRAN_UE_REPO)"; _UPSTREAM_REF="$(SRSRAN_UE_REF)" ;; \
 			ocudu)  _UPSTREAM_REPO="$(OCUDU_REPO)"; _UPSTREAM_REF="$(OCUDU_REF)" ;; \
+			ueransim) _UPSTREAM_REPO="$(UERANSIM_REPO)"; _UPSTREAM_REF="$(UERANSIM_REF)" ;; \
 			*)      _UPSTREAM_REPO=""; _UPSTREAM_REF="" ;; \
 		esac; \
 		if [ -n "$$_UPSTREAM_REPO" ]; then \
@@ -59,10 +62,11 @@ docker-build:
 			gnb)    _TARGET_BUILD_ARGS="--build-arg SRSRAN_REF=$(SRSRAN_GNB_REF)" ;; \
 			ue)     _TARGET_BUILD_ARGS="--build-arg SRSRAN_REF=$(SRSRAN_UE_REF)" ;; \
 			ocudu)  _TARGET_BUILD_ARGS="--build-arg OCUDU_REF=$(OCUDU_REF)" ;; \
+			ueransim) _TARGET_BUILD_ARGS="--build-arg UERANSIM_REF=$(UERANSIM_REF)" ;; \
 			*)      _TARGET_BUILD_ARGS="" ;; \
 		esac; \
 		case $$target in \
-			ocudu)  _IMAGE_NAME="${DOCKER_REGISTRY}${DOCKER_REPOSITORY}$$target:${DOCKER_TAG}" ;; \
+			ocudu|ueransim) _IMAGE_NAME="${DOCKER_REGISTRY}${DOCKER_REPOSITORY}$$target:${DOCKER_TAG}" ;; \
 			*)      _IMAGE_NAME="${DOCKER_REGISTRY}${DOCKER_REPOSITORY}${PROJECT_NAME}-$$target:${DOCKER_TAG}" ;; \
 		esac; \
 		DOCKER_BUILDKIT=$(DOCKER_BUILDKIT) docker build $(DOCKER_BUILD_ARGS) \
@@ -82,7 +86,7 @@ docker-build:
 docker-push:
 	for target in $(DOCKER_TARGETS); do \
 		case $$target in \
-			ocudu)  _IMAGE_NAME="${DOCKER_REGISTRY}${DOCKER_REPOSITORY}$$target:${DOCKER_TAG}" ;; \
+			ocudu|ueransim) _IMAGE_NAME="${DOCKER_REGISTRY}${DOCKER_REPOSITORY}$$target:${DOCKER_TAG}" ;; \
 			*)      _IMAGE_NAME="${DOCKER_REGISTRY}${DOCKER_REPOSITORY}${PROJECT_NAME}-$$target:${DOCKER_TAG}" ;; \
 		esac; \
 		docker push $$_IMAGE_NAME; \

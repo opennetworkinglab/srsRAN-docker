@@ -1,0 +1,76 @@
+# Build args
+################
+# OS_VERSION            Ubuntu OS version
+# UERANSIM_REF          Git ref to build
+
+ARG OS_VERSION=22.04
+ARG UERANSIM_REF=v3.2.7
+
+##################
+# Stage 1: Build #
+##################
+FROM ubuntu:$OS_VERSION AS builder
+
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    git \
+    build-essential \
+    cmake \
+    libsctp-dev \
+    ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+ARG UERANSIM_REF
+RUN git clone --depth 1 --branch ${UERANSIM_REF} https://github.com/aligungr/UERANSIM.git /src
+
+WORKDIR /src
+
+RUN cmake . && \
+    make -j"$(nproc)" && \
+    install -m 0755 build/nr-binder build/nr-cli build/nr-gnb build/nr-ue /usr/local/bin/
+
+################
+# Stage 2: Run #
+################
+FROM ubuntu:$OS_VERSION AS ueransim
+
+# Build arguments for dynamic labels
+ARG VERSION=dev
+ARG VCS_URL=unknown
+ARG VCS_REF=unknown
+ARG BUILD_DATE=unknown
+ARG UERANSIM_REF
+ARG UPSTREAM_COMMIT=unknown
+
+LABEL org.opencontainers.image.source="${VCS_URL}" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.created="${BUILD_DATE}" \
+      org.opencontainers.image.revision="${VCS_REF}" \
+      org.opencontainers.image.url="${VCS_URL}" \
+      org.opencontainers.image.title="ueransim" \
+      org.opencontainers.image.description="UERANSIM gNB and UE simulator" \
+      org.opencontainers.image.authors="Aether SD-Core <dev@lists.aetherproject.org>" \
+      org.opencontainers.image.vendor="Aether Project" \
+      org.opencontainers.image.licenses="AGPL-3.0-only" \
+      org.opencontainers.image.documentation="https://github.com/aligungr/UERANSIM" \
+      org.ueransim.upstream.source="https://github.com/aligungr/UERANSIM.git" \
+      org.ueransim.upstream.ref="${UERANSIM_REF}" \
+      org.ueransim.upstream.commit="${UPSTREAM_COMMIT}"
+
+COPY --from=builder /usr/local/bin/nr-binder /usr/local/bin/nr-binder
+COPY --from=builder /usr/local/bin/nr-cli /usr/local/bin/nr-cli
+COPY --from=builder /usr/local/bin/nr-gnb /usr/local/bin/nr-gnb
+COPY --from=builder /usr/local/bin/nr-ue /usr/local/bin/nr-ue
+
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    iperf3 \
+    iproute2 \
+    iptables \
+    iputils-ping \
+    libsctp1 && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /opt/ueransim
+
+CMD ["/bin/bash"]

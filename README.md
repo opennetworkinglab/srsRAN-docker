@@ -1,7 +1,7 @@
 # srsRAN-docker
 
 This repository contains Dockerfiles to build Docker images for OCUDU, srsRAN
-gNB and srsRAN UE
+gNB, srsRAN UE, and UERANSIM
 
 > [!IMPORTANT]
 > srsRAN gNB support, and its related files and target, is expected to be
