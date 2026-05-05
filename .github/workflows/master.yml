@@ -52,3 +52,16 @@ jobs:
         with:
           dockerfile: Dockerfile-ue
           ignore: DL3008
+
+  hadolint-ueransim:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Dockerfile linter
+        uses: hadolint/hadolint-action@v3.3.0
+        # For now, ignoring:
+        # DL3008 warning: Pin versions in apt get install (e.g., apt-get install <package>=<version>)
+        with:
+          dockerfile: Dockerfile-ueransim
+          ignore: DL3008
